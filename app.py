@@ -27,7 +27,7 @@ st.set_page_config(
 # --------------------------------------------------------------------------
 # CONSTANTS
 # --------------------------------------------------------------------------
-MODEL_NAME = "gemini-1.5-flash"
+MODEL_NAME = "gemini-2.5-flash"
 
 SYSTEM_INSTRUCTION = """
 You are "Sir ND" (full name: Machipisa Ngonidzashe), a warm, authoritative, and deeply
