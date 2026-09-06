@@ -1,6 +1,7 @@
 """
 Sir ND by Machipisa Ngonidzashe
-A ZIMSEC O-Level AI Tutor built with Streamlit + Google Gemini 1.5 Flash.
+A ZIMSEC O-Level AI Tutor built with Streamlit + Google Gemini (via the
+google-genai SDK).
 
 Run locally:
     streamlit run app.py
@@ -11,7 +12,8 @@ Deploy: see DEPLOYMENT.md
 import io
 import datetime
 import streamlit as st
-import google.generativeai as genai
+from google import genai
+from google.genai import types
 from pypdf import PdfReader
 
 # --------------------------------------------------------------------------
@@ -27,7 +29,13 @@ st.set_page_config(
 # --------------------------------------------------------------------------
 # CONSTANTS
 # --------------------------------------------------------------------------
-MODEL_NAME = "gemini-2.5-flash"
+MODEL_NAME = "gemini-3.6-flash"
+# Google ships new Flash versions every few weeks (3.6 -> 3.7 -> 3.8 happened
+# within about a month in mid-2026) and retires old ones on a few months'
+# notice. If this model name ever 404s again, either:
+#   1) swap in whatever newer version Google's error message names, or
+#   2) use the auto-updating alias "gemini-flash-latest" instead (trades
+#      long-term stability for occasionally landing on a preview model).
 
 SYSTEM_INSTRUCTION = """
 You are "Sir ND" (full name: Machipisa Ngonidzashe), a warm, authoritative, and deeply
@@ -145,27 +153,12 @@ if not API_KEY:
     )
     st.stop()
 
-genai.configure(api_key=API_KEY)
-
-
 @st.cache_resource(show_spinner=False)
-def load_tutor_model():
-    return genai.GenerativeModel(
-        model_name=MODEL_NAME,
-        system_instruction=SYSTEM_INSTRUCTION,
-    )
+def load_client():
+    return genai.Client(api_key=API_KEY)
 
 
-@st.cache_resource(show_spinner=False)
-def load_report_model():
-    return genai.GenerativeModel(
-        model_name=MODEL_NAME,
-        system_instruction=REPORT_SYSTEM_INSTRUCTION,
-    )
-
-
-tutor_model = load_tutor_model()
-report_model = load_report_model()
+client = load_client()
 
 
 # --------------------------------------------------------------------------
@@ -230,11 +223,11 @@ def build_prompt_with_context(user_message: str) -> str:
 
 
 def gemini_chat_history():
-    """Convert session_state.messages into Gemini's expected history format."""
+    """Convert session_state.messages into the google-genai history format."""
     history = []
     for m in st.session_state.messages:
         role = "user" if m["role"] == "user" else "model"
-        history.append({"role": role, "parts": [m["content"]]})
+        history.append({"role": role, "parts": [{"text": m["content"]}]})
     return history
 
 
@@ -258,7 +251,13 @@ def generate_parent_report() -> str:
     )
 
     try:
-        response = report_model.generate_content(prompt)
+        response = client.models.generate_content(
+            model=MODEL_NAME,
+            contents=prompt,
+            config=types.GenerateContentConfig(
+                system_instruction=REPORT_SYSTEM_INSTRUCTION
+            ),
+        )
         return response.text
     except Exception as e:
         return f"⚠️ Could not generate report: {e}"
@@ -375,9 +374,14 @@ if user_input:
         placeholder = st.empty()
         full_reply = ""
         try:
-            chat_session = tutor_model.start_chat(history=history_for_model)
-            response_stream = chat_session.send_message(prompt, stream=True)
-            for chunk in response_stream:
+            chat_session = client.chats.create(
+                model=MODEL_NAME,
+                history=history_for_model,
+                config=types.GenerateContentConfig(
+                    system_instruction=SYSTEM_INSTRUCTION
+                ),
+            )
+            for chunk in chat_session.send_message_stream(prompt):
                 if chunk.text:
                     full_reply += chunk.text
                     placeholder.markdown(full_reply + "▌")
